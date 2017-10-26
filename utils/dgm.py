@@ -45,6 +45,7 @@ def multinoulliUniformLogDensity(inputs):
 ############## Neural Network modules ##############
 
 def initNetwork(n_in, n_hid, n_out, vname):
+    """ Initialize a generic dense network with arbitrary structure """
     weights = {}
     for layer, neurons in enumerate(n_hid):
         weight_name, bias_name = 'W'+str(layer), 'b'+str(layer)
@@ -72,6 +73,7 @@ def initCatNet(n_in, n_hid, n_out, vname):
     return weights
 
 def forwardPass(x, weights, n_h, nonlinearity, bn, training, scope, reuse):
+    """ Generic forward pass through a dense network with arbitrary architecture """
     h = x
     for layer, neurons in enumerate(n_h):
 	weight_name, bias_name = 'W'+str(layer), 'b'+str(layer)
@@ -111,56 +113,16 @@ def forwardPassBernoulli(x, weights, n_h, nonlinearity, bn=False, training=True,
     return tf.nn.sigmoid(forwardPassCatLogits(x, weights, n_h, nonlinearity, bn, training, scope, reuse))
 
 
-############## Bayesian Neural Network modules ############## 
+############## Statistic Network modules ############## 
 
-def _forward_pass_Cat_logits_bnn(x, weights, q, n_h, nonlinearity, bn, training):
-    """ Forward pass through a BNN and variational approximation with weights as dictionaries """
-    h = x
-    for layer, neurons in enumerate(n_h):
-    	weight_name, bias_name = 'W'+str(layer), 'b'+str(layer)
-    	weight_mean, bias_mean = 'W'+str(layer)+'_mean', 'b'+str(layer)+'_mean'
-	htilde = tf.matmul(h, q[weight_mean]) + q[bias_mean]
-	h = tf.matmul(h, weights[weight_name]) + weights[bias_name]
-	if bn:
-	    h = bayes_batch_norm(h, htilde, weights, q, layer, training)
-        h = nonlinearity(h)
-    logits = tf.matmul(h, weights['Wout']) + weights['bout']
-    return logits
+def initStatNet(n_in, n_h, n_e, n_out, vname):
+    """ Initialize a simple statistic network for NS models """
+    encoder = initNetwork(n_in, n_h, n_e, vname+'_encoder')
+    decoder = initGaussNet(n_e, n_h, n_out, vname+'_decoder')
+    return {'encoder':encoder, 'decoder':decoder}
 
-def _init_Cat_bnn(n_in, architecture, n_out, vname, initVar=-5):
-    weights = {}
-    for i, neurons in enumerate(architecture):
-        weight_mean, bias_mean = 'W'+str(i)+'_mean', 'b'+str(i)+'_mean'
-        weight_logvar, bias_logvar = 'W'+str(i)+'_logvar', 'b'+str(i)+'_logvar'
-        if i == 0:
-            weights[weight_mean] = tf.Variable(xavier_initializer(n_in, architecture[i]), name=vname+weight_mean)
-            weights[weight_logvar] = tf.Variable(tf.fill([n_in, architecture[i]], initVar), name=vname+weight_logvar)
-        else:
-            weights[weight_mean] = tf.Variable(xavier_initializer(architecture[i-1], architecture[i]), name=vname+weight_mean)
-            weights[weight_logvar] = tf.Variable(tf.fill([architecture[i-1], architecture[i]], initVar), name=vname+weight_logvar)
-        weights[bias_mean] = tf.Variable(tf.zeros(architecture[i]) + 1e-1, name=vname+bias_mean)
-        weights[bias_logvar] = tf.Variable(tf.fill([architecture[i]], initVar), name=vname+bias_logvar)
-    weights['Wout_mean'] = tf.Variable(xavier_initializer(architecture[-1], n_out), name=vname+'Wout_mean')
-    weights['Wout_logvar'] = tf.Variable(tf.fill([architecture[-1], n_out], initVar), name=vname+'Wout_logvar')
-    weights['bout_mean'] = tf.Variable(tf.zeros(n_out) + 1e-1, name=vname+'bout_mean')
-    weights['bout_logvar'] = tf.Variable(tf.fill([n_out], value = initVar), name=vname+'bout_logvar')
-    return weights
-
-def _forward_pass_Cat_bnn(x, weights, q, n_h, nonlinearity, bn=False, training=True):
-    """ Forward pass through network with given weights - Categorical output """
-    return tf.nn.softmax(_forward_pass_Cat_logits_bnn(x, weights, q, n_h, nonlinearity, bn, training))
-
-def bayes_batch_norm(inputs, var_inputs, weights, q, layer, training, decay=0.99, epsilon=1e-3):
-    layer = str(layer)
-    if training==True:
-        batch_mean, batch_var = tf.nn.moments(var_inputs,[0])
-        train_mean = tf.assign(weights['mean'+layer],
-                               weights['mean'+layer] * decay + batch_mean * (1 - decay))
-        train_var = tf.assign(weights['var'+layer],
-                              weights['var'+layer] * decay + batch_var * (1 - decay))
-        with tf.control_dependencies([train_mean, train_var]):
-            return tf.nn.batch_normalization(inputs,
-                batch_mean, batch_var, weights['beta'+layer], weights['scale'+layer], epsilon)
-    else:
-        return tf.nn.batch_normalization(inputs,
-            weights['mean'+layer], weights['var'+layer], weights['beta'+layer], weights['scale'+layer], epsilon)
+def samplePassStatistic(x, statNet, n_h, nonlinearity=tf.nn.relu, bn=True, mc_samps=1, training=True, scope='scope', reuse=True):
+    """ Map from a dataset (x) to params of a context vector distribution """
+    E = forwardPass(x, statNet['encoder'], n_h, nonlinearity, bn, training, scope+'_encoder', reuse)
+    V = tf.expand_dims(tf.reduce_mean(E, axis=0), 0)
+    return samplePassGauss(V, statNet['decoder'], n_h, nonlinearity, bn, mc_samps, training, scope+'_decoder', reuse)
