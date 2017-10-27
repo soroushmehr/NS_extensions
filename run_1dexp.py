@@ -22,9 +22,15 @@ data = simple_data(D)
 n_D, n_x = data.n_d, data.n_x
 
 # Specify model parameters
+<<<<<<< HEAD
 lr = (3e-3,)
 n_z, n_c, n_e = 32, 3, 128
 n_hidden = [128, 128, 128]
+=======
+lr = (1e-3,)
+n_z, n_c, n_e = 32, 3, 128
+n_hidden = [128,128]
+>>>>>>> bcbb7f3
 n_epochs = 50
 x_dist = 'Gaussian'
 batchnorm, mc_samps = False, 1
